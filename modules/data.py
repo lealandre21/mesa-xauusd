@@ -38,8 +38,8 @@ def spot():
 
 
 @st.cache_data(ttl=30, show_spinner=False)
-def candles(interval: str = "15m", limit: int = 100):
-    """Lista de candles reais: [{t, o, h, l, c}]."""
+def _binance_candles(interval: str = "15m", limit: int = 100):
+    """Klines da Binance PAXGUSDT (proxy) com volume comprador incluído."""
     d = _try(
         f"https://api.binance.com/api/v3/klines"
         f"?symbol=PAXGUSDT&interval={interval}&limit={limit}"
@@ -53,13 +53,41 @@ def candles(interval: str = "15m", limit: int = 100):
                 "h": float(k[2]),
                 "l": float(k[3]),
                 "c": float(k[4]),
+                "v": float(k[5]),        # volume total do candle
+                "vb": float(k[9]),       # volume comprado por compradores agressivos (taker buy)
             }
         )
     return out
 
 
+@st.cache_data(ttl=30, show_spinner=False)
+def candles(interval: str = "15m", limit: int = 100):
+    """Candles da Mesa: PREFERE o MT5 (broker real); fallback Binance."""
+    from modules import mt5_data
+    try:
+        dados = mt5_data.candles(interval, limit)
+        if dados:
+            return dados
+    except Exception:
+        pass
+    return _binance_candles(interval, limit)
+
+
+@st.cache_data(ttl=90, show_spinner=False)
+def candles_binance(interval: str = "15m", limit: int = 100):
+    """Versão FIXEDA na Binance — usada pra pressão de volume (agressão)."""
+    return _binance_candles(interval, limit)
+
+
 def book():
-    """Melhor bid/ask da Binance para calcular spread."""
+    """Bid/ask: PREFERE o broker real (MT5); fallback Binance."""
+    from modules import mt5_data
+    t = mt5_data.tick()
+    if t and t.get("bid") and t.get("ask"):
+        try:
+            return float(t["bid"]), float(t["ask"])
+        except (TypeError, ValueError):
+            pass
     d = _try("https://api.binance.com/api/v3/ticker/bookTicker?symbol=PAXGUSDT")
     try:
         return float(d["bidPrice"]), float(d["askPrice"])

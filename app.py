@@ -2,7 +2,7 @@ import streamlit as st
 
 from datetime import datetime
 
-from modules import data, plan, scan, counselor, chat, diario, dashboard, secrets, voz
+from modules import data, plan, scan, counselor, chat, diario, dashboard, secrets, voz, indicadores, news
 from modules.chart import show_chart
 from modules.calendar import upcoming
 from modules.nota import resumo as nota_resumo
@@ -107,6 +107,21 @@ def painel_vivo():
 
 
 painel_vivo()
+
+# =====================================
+# NOTÍCIAS (faixa rolando + manchetes) — só informação, não é leitura
+# =====================================
+
+try:
+    news_itens = news.manchetes()
+except Exception:
+    news_itens = []
+
+if news_itens:
+    news.banda(news_itens)
+    with st.expander("📰 Manchetes do forex (RSS grátis · 5 min de cache)"):
+        news.lista(news_itens)
+
 st.divider()
 
 # =====================================
@@ -141,6 +156,28 @@ with g2:
         else:
             st.warning("Voz indisponível agora (rede?) — o plano tá escrito acima. 👆")
 
+# =====================================
+# TERMÔMETROS (RSI · ATR · pressão) — confirmação, nunca sinal
+# =====================================
+
+try:
+    ind = indicadores.leitura(tf)
+except Exception:
+    ind = None
+
+if ind and ind.get("rsi") is not None:
+    t1, t2, t3 = st.columns(3)
+    with t1:
+        st.metric("🌡️ RSI", f"{ind['rsi']:.1f}")
+        st.caption(ind["rsi_txt"])
+    with t2:
+        st.metric("📏 Volatil (ATR)", data.fmt(ind["atr"]))
+        st.caption(ind["atr_txt"])
+    with t3:
+        pc, pv = ind["press"] or (None, None)
+        st.metric("⚖️ Pressão", f"{pc:.0f}%⬆ / {pv:.0f}%⬇" if pc is not None else "-")
+        st.caption(ind["press_txt"])
+
 st.divider()
 
 # =====================================
@@ -153,7 +190,6 @@ modo_ia = st.selectbox(
     "🎭 Modo da conversa",
     list(chat.MODOS.keys()),
     index=0,
-    horizontal=False,
 )
 
 chat.render_chat(usar_claude=usar_claude, api_key=api_key, modelo=modelo, modo=modo_ia)
@@ -260,4 +296,16 @@ with st.expander("🩺 Sistema"):
     for icone, msg_log in system_logs():
         st.write(icone, msg_log)
 
-    st.success("🫀 Online · dados reais (gold-api + Binance PAXG) · demo sempre")
+    # status da ponte MT5 (broker real)
+    from modules import mt5_data
+    v_tick = mt5_data.tick()
+    if v_tick:
+        st.success(f"📊 Broker real: **{v_tick['symbol']}** · spread US$ {v_tick['spread']} "
+                   f"· conta `{(mt5_data.acct() or {}).get('login', '—')}`")
+        st.caption("Candles vêm do terminal MT5 (Python 3.12 + mt5_server). "
+                   "Pressão de volume segue lendo a Binance (proxy).")
+    else:
+        st.caption("📊 Broker real (MT5) offline — usando gold-api + Binance PAXG (proxy). "
+                   "Liga o terminal pra dados de broker.")
+
+    st.success("🫀 Online · dados reais (MT5 broker + gold-api + Binance PAXG) · demo sempre")
