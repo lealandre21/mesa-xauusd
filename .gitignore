@@ -1,0 +1,11 @@
+# lixo de execução
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# dados locais (histórico do diário e listas geradas)
+diario.csv
+.lastping
+
+# configuração pessoal (nunca público)
+.streamlit/secrets.toml

@@ -1,0 +1,5 @@
+# Mesa XAUUSD — dependências (Streamlit Cloud instala isso sozinho)
+streamlit
+plotly
+edge-tts
+requests
