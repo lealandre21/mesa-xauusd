@@ -143,11 +143,18 @@ with g2:
     # 🎬 player pequeno AO LADO DO GRÁFICO — curador IA escolhe o vídeo do conceito
     from modules import videos as vid
     conceito, rotulo, url_v, dica_ia = vid.escolher(p)
+    # toca o favorito do conceito atual; sem ele, QUALQUER favorito serve de
+    # exemplo vivo (senão a tela ficaria só com botão — o "video sumiu" do Leala)
     url_fixada = vid.fixados().get(conceito)
+    if not url_fixada:
+        favoritos = list(vid.fixados().values())
+        url_fixada = favoritos[0] if favoritos else None
     u_emb = vid.embed_url(url_fixada or "")
     if u_emb:
         st.iframe(u_emb, width=240, height=426)
-        st.markdown(f"[⤴️ abrir no YouTube]({url_v})", help="Link da busca/vídeo original")
+        st.markdown(f"[⤴️ abrir no YouTube]({url_v})", help="Link da busca/vídeo sugerido pela curadoria")
+        st.caption(f"🎬 conceito do momento: **{conceito}**"
+                   + (" (exemplo geral — fixe um vídeo deste conceito no cartão)" if not vid.fixados().get(conceito) else " (seu vídeo favorito)"))
     else:
         st.link_button(rotulo, url=url_v, help="Abre o YouTube")
         st.caption("➕ Fixe um vídeo favorito no cartão pra ele tocar aqui.")
