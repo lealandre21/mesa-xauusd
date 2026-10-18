@@ -139,6 +139,21 @@ with g1:
 
 with g2:
     p = plan.plano()
+
+    # 🎬 player pequeno AO LADO DO GRÁFICO — curador IA escolhe o vídeo do conceito
+    from modules import videos as vid
+    conceito, rotulo, url_v, dica_ia = vid.escolher(p)
+    url_fixada = vid.fixados().get(conceito)
+    u_emb = vid.embed_url(url_fixada or "")
+    if u_emb:
+        st.iframe(u_emb, width=240, height=426)
+        st.markdown(f"[⤴️ abrir no YouTube]({url_v})", help="Link da busca/vídeo original")
+    else:
+        st.link_button(rotulo, url=url_v, help="Abre o YouTube")
+        st.caption("➕ Fixe um vídeo favorito no cartão pra ele tocar aqui.")
+    if dica_ia:
+        st.caption(f"🤖 Curador IA: {dica_ia}")
+
     st.markdown(f"### 🧭 {p['headline']}")
     for texto, ok in p["checks"]:
         st.write(("✅" if ok else "⏳") + " " + texto)
@@ -295,14 +310,7 @@ def modo_demo():
                         st.session_state["armado"] = None
 
         with cv_r:
-            # 🎬 player pequeno do lado das informações (se houver vídeo fixado)
-            url_embed = vid_m.embed_url(url_fixada or "")
-            if url_embed:
-                st.iframe(url_embed, width=280, height=500)
-                st.markdown(f"[⤴️ abrir maior]({url_v})", help="Abre no YouTube")
-            else:
-                st.link_button(rotulo, url=url_v, help="Abre no YouTube")
-                st.caption("➕ Fixe um vídeo favorito (abaixo) pra ele aparecer aqui.")
+            # ⚙️ fixar favorito: só o controle (o player mora ao lado do gráfico)
             with st.expander("➕ Fixar meu vídeo favorito"):
                 nova_url = st.text_input("Cole a URL do Short aqui:", key="url_fixar_demo")
                 if st.button("💾 Salvar vídeo favorito", key="btn_fixar_demo"):

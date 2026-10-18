@@ -12,6 +12,8 @@ import json
 import os
 import urllib.parse
 
+import streamlit as st
+
 ARQ_FIXADOS = os.path.join(os.path.dirname(os.path.dirname(__file__)), "videos_fixados.json")
 
 # conceito → (nome amigável, termo de busca no YouTube)
@@ -28,6 +30,7 @@ CONCEITOS = {
     "pd": ("Premium & Discount (metade cara / metade barata)",
            "ICT premium discount zones shorts"),
     "setup": ("Entrada: gatilho de corpo + plano", "SMC entry setup confirmation shorts"),
+    "ob": ("Order Block (de onde o preço costuma renascer)", "ICT order block shorts"),
 }
 
 # termos que ligam cada conceito nos textos do plano
@@ -101,3 +104,77 @@ def video_do_conceito(conceito: str) -> tuple[str, str]:
     if u:
         return f"🎬 Seu vídeo: {nome}", u
     return f"🎬 60s sobre: {nome}", busca_url(termo)
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def curador_ia(headline: str, gatilho: str, invalida: str) -> str | None:
+    """IA do hub escolhe o conceito + termo de busca + dica. None sem hub/erro."""
+    from modules import secrets
+    from modules import claude_api
+
+    gw = secrets.gateway()
+    if not gw:
+        return None
+    lista = "\n".join(f"- {k} → {nome}" for k, (nome, _t) in CONCEITOS.items())
+    instrucoes = (
+        "Você é o curador de vídeos de estudo da Mesa XAUUSD (SMC/ICT). "
+        "Público: iniciante que estuda via Shorts de ~60s no YouTube.\n"
+        "Dado o PLANO do momento, escolha o ÚNICO conceito da lista cujo vídeo "
+        "mais ajuda a entender a leitura atual. Depois escreva um termo de busca "
+        "curto em inglês (YouTube Shorts, ex: 'ict liquidity sweep shorts') e uma "
+        "dica de 1 frase em PT-BR dizendo o que observar no vídeo pra aplicar "
+        "nesse gráfico agora.\n"
+        f"Lista válida:\n{lista}\n\n"
+        f"PLANO: {headline} | gatilho: {gatilho} | invalidação: {invalida}\n\n"
+        "Responda AGORA apenas as 3 linhas pedidas. NÃO escreva análise, "
+        "raciocínio, números de linha ou markdown — só as 3 linhas:\n"
+        "conceito=CHAVE\nbusca=termo\ndica=uma frase"
+    )
+    try:
+        resposta = claude_api.ask(
+            gw["token"], "auto/claude-haiku",
+            instrucoes, [("user", "conceito= / busca= / dica= — só isso."), ],
+            base_url=gw["base_url"], timeout=45, max_tokens=500,
+        )
+        return resposta or None
+    except Exception:
+        return None
+
+
+def escolher(p: dict):
+    """Curador completa: IA primeiro, palavras-chave como plano B.
+
+    → (conceito, rótulo, url, dica_ia)
+    """
+    dica = None
+    conceito = None
+    busca = None
+    try:
+        texto_ia = curador_ia(str(p.get("headline", "")),
+                              str(p.get("gatilho", "")),
+                              str(p.get("invalidacao", ""))) or ""
+        for linha in texto_ia.splitlines():
+            if "=" in linha:
+                k, _, v = linha.partition("=")
+                k = k.strip().lower()
+                v = v.strip().strip("*_ ")
+                if k == "conceito":
+                    conceito = v.lower()
+                elif k == "busca":
+                    busca = v
+                elif k == "dica":
+                    dica = v
+    except Exception:
+        pass
+
+    if conceito not in CONCEITOS:  # sem IA ou resposta estranha → plano B por palavra
+        conceito = conceitos_do_plano(p)[0]
+        rotulo, url = video_do_conceito(conceito)
+        return conceito, rotulo, url, dica
+
+    fixada = fixados().get(conceito)
+    if fixada:
+        return conceito, f"🎬 Seu vídeo: {CONCEITOS[conceito][0]}", fixada, dica
+    if not busca:
+        busca = CONCEITOS[conceito][1]
+    return conceito, f"🎬 60s sobre: {CONCEITOS[conceito][0]}", busca_url(busca), dica
