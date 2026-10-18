@@ -205,6 +205,11 @@ def modo_demo():
     st.caption(f"Conta `{demo_acct['login']}` @ {demo_acct['servidor']} · "
                f"saldo {demo_acct['saldo']:.2f} {demo_acct['moeda']} · DEMO confirmada")
 
+    # 📐 Fibo OTE (sempre visível — contexto, nunca sinal)
+    from modules import fibo, videos as vid_m
+    f_leg = fibo.perna("15m", 96)
+    st.caption(fibo.linha(f_leg))
+
     card = tr_m.cartao()
     estado = "de_fora"
     if not card.get("sem_setup"):
@@ -238,6 +243,25 @@ def modo_demo():
         st.caption(f"📋 Plano: **{card['headline']}** · risco estimado "
                    f"US$ {tr_m.risco_dinheiro(card['preco'], card['stop'], *mt5_data.risco() or (None, None)):.2f} (lote 0.01) · "
                    f"invalidação: {card['invalida_txt'] if not card.get('rr_baixo') else 'R:R insuficiente — plano recusado'}")
+
+        # 🎬 vídeo de estudo do conceito que disparou (+ fixar favorito)
+        objetivos = vid_m.conceitos_do_plano({"headline": card["headline"],
+                                              "gatilho": card.get("gatilho", ""),
+                                              "invalidacao": card.get("invalida_txt", "")})
+        rotulo, url_v = vid_m.video_do_conceito(objetivos[0])
+        vcol1, vcol2 = st.columns([1.4, 1.6])
+        vcol1.link_button(rotulo, url=url_v, help="Abre no YouTube")
+        with vcol2:
+            modo_fixar = st.toggle("➕ Fixar meu vídeo favorito", key="tg_fixar")
+            if modo_fixar:
+                nova_url = st.text_input("Cole a URL do Short aqui:",
+                                         key="url_fixar_demo")
+                if st.button("💾 Salvar vídeo favorito", key="btn_fixar_demo"):
+                    if vid_m.fixar(objetivos[0], nova_url or ""):
+                        st.success("Memorizado! A partir de agora é o vídeo desse conceito.")
+                    else:
+                        st.error("URL estranha ou conceito inválido — cola o link completo do YouTube.")
+
         if card.get("rr_baixo"):
             st.warning(f"⚠️ R:R {card['rr_baixo']:.2f} < 1.0 — execução travada. "
                        "Esperar setup melhor é trade bom.")
