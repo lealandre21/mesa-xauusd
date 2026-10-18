@@ -56,6 +56,23 @@ def busca_url(termo: str) -> str:
     return "https://www.youtube.com/results?search_query=" + urllib.parse.quote_plus(termo)
 
 
+def id_de(url: str) -> str | None:
+    """Extrai o ID do vídeo de vários formatos de link do YouTube."""
+    u = (url or "").split("?")[0].rstrip("/")
+    for marcador in ("/shorts/", "youtu.be/", "/embed/", "watch/"):
+        if marcador in u:
+            return u.split(marcador)[-1] or None
+    if "watch?v=" in url:
+        return url.split("watch?v=")[-1].split("&")[0] or None
+    return None
+
+
+def embed_url(url: str) -> str | None:
+    """Link → URL de player embutido (iframe) ou None se id não sair."""
+    vid = id_de(url)
+    return f"https://www.youtube.com/embed/{vid}" if vid else None
+
+
 def fixados() -> dict:
     """URLs fixadas pelo usuário: {conceito: url}."""
     try:

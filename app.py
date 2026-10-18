@@ -235,73 +235,81 @@ def modo_demo():
         st.info(f"🧭 {card['headline']} — sem gatilho de entrada agora. "
                 "Esperar é executar também.")
     else:
-        c1, c2, c3, c4 = st.columns([1.1, 1.1, 1.1, 1.3])
-        c1.metric("🎯 Entrada (mercado)", data.fmt(card["preco"]))
-        c2.metric("⛔ Stop", data.fmt(card["stop"]))
-        c3.metric("🏁 Alvo", data.fmt(card["alvo"]))
-        c4.metric("⚖️ R:R", f"{card['rr']:.2f}" if card.get("rr") else "auto")
-        st.caption(f"📋 Plano: **{card['headline']}** · risco estimado "
-                   f"US$ {tr_m.risco_dinheiro(card['preco'], card['stop'], *mt5_data.risco() or (None, None)):.2f} (lote 0.01) · "
-                   f"invalidação: {card['invalida_txt'] if not card.get('rr_baixo') else 'R:R insuficiente — plano recusado'}")
-
-        # 🎬 vídeo de estudo do conceito que disparou (+ fixar favorito)
+        # 🎬 conceito → vídeo (fixado no JSON ou busca), calculado antes do layout
         objetivos = vid_m.conceitos_do_plano({"headline": card["headline"],
                                               "gatilho": card.get("gatilho", ""),
                                               "invalidacao": card.get("invalida_txt", "")})
         rotulo, url_v = vid_m.video_do_conceito(objetivos[0])
-        vcol1, vcol2 = st.columns([1.4, 1.6])
-        vcol1.link_button(rotulo, url=url_v, help="Abre no YouTube")
-        with vcol2:
-            modo_fixar = st.toggle("➕ Fixar meu vídeo favorito", key="tg_fixar")
-            if modo_fixar:
-                nova_url = st.text_input("Cole a URL do Short aqui:",
-                                         key="url_fixar_demo")
+        url_fixada = vid_m.fixados().get(objetivos[0])
+
+        cv_l, cv_r = st.columns([2.35, 1.0])
+        with cv_l:
+            c1, c2, c3, c4 = st.columns([1.1, 1.1, 1.1, 1.3])
+            c1.metric("🎯 Entrada (mercado)", data.fmt(card["preco"]))
+            c2.metric("⛔ Stop", data.fmt(card["stop"]))
+            c3.metric("🏁 Alvo", data.fmt(card["alvo"]))
+            c4.metric("⚖️ R:R", f"{card['rr']:.2f}" if card.get("rr") else "auto")
+            st.caption(f"📋 Plano: **{card['headline']}** · risco estimado "
+                       f"US$ {tr_m.risco_dinheiro(card['preco'], card['stop'], *mt5_data.risco() or (None, None)):.2f} (lote 0.01) · "
+                       f"invalidação: {card['invalida_txt'] if not card.get('rr_baixo') else 'R:R insuficiente — plano recusado'}")
+
+            if card.get("rr_baixo"):
+                st.warning(f"⚠️ R:R {card['rr_baixo']:.2f} < 1.0 — execução travada. "
+                           "Esperar setup melhor é trade bom.")
+            else:
+                st.markdown(f"✅ **R:R {card['rr']:.2f}** · gatilho: *{card['gatilho']}*")
+
+                lado = card["direcao"]
+                if st.checkbox("⚡ Confirmo: conta DEMO, li o plano inteiro",
+                               value=st.session_state.get("demo_ok", False)):
+                    st.session_state["demo_ok"] = True
+                    boa = lado == "compra"
+                    n1 = "🟢 ARMAR COMPRA" if boa else "🔴 ARMAR VENDA"
+                    if st.button(n1, type="secondary"):
+                        st.session_state["armado"] = (lado, datetime.now().timestamp())
+                    armado = st.session_state.get("armado")
+                    if armado and armado[0] == lado and (datetime.now().timestamp() - armado[1]) < 240:
+                        st.write(f"🔒 **Arma armada** — {lado.upper()} @ {data.fmt(card['preco'])} · "
+                                 f"SL {data.fmt(card['stop'])} · TP {data.fmt(card['alvo'])} · lote 0.01")
+                        st.write(f"*Confirma em {(240 - int(datetime.now().timestamp() - armado[1]))}s*")
+                        if st.button(f"🔥 **CONFIRMAR {lado.upper()}** — enviar ordem (lote 0.01)",
+                                     type="primary"):
+                            st.session_state["armado"] = None
+                            with st.spinner("Enviando pra ponte..."):
+                                resp = mt5_data.enviar(lado, 0.01, card["stop"], card["alvo"])
+                            if resp and resp.get("ok"):
+                                tr_m.registra({
+                                    "quando": tr_m.agora(), "tipo": "demo",
+                                    "symbol": resp["symbol"], "direcao": lado,
+                                    "lote": resp["lote"], "entrada": resp["preco"],
+                                    "stop": resp["sl"], "alvo": resp["tp"],
+                                    "plano": card["headline"], "ticket": resp["ticket"],
+                                })
+                                st.toast(f"Ordem no ar! ticket {resp['ticket']}", icon="✅")
+                                st.success(f"💰 **{lado.upper()} no ar** — ticket `{resp['ticket']}` · "
+                                           f"entrada {data.fmt(resp['preco'])} · SL {data.fmt(resp['sl'])} · "
+                                           f"TP {data.fmt(resp['tp'])}")
+                            else:
+                                st.error(f"Corretor recusou: {((resp or {}).get('erro', 'sem resposta'))}")
+                    elif armado and armado[0] != lado:
+                        st.session_state["armado"] = None
+
+        with cv_r:
+            # 🎬 player pequeno do lado das informações (se houver vídeo fixado)
+            url_embed = vid_m.embed_url(url_fixada or "")
+            if url_embed:
+                st.components.v1.iframe(url_embed, width=280, height=500)
+                st.markdown(f"[⤴️ abrir maior]({url_v})", help="Abre no YouTube")
+            else:
+                st.link_button(rotulo, url=url_v, help="Abre no YouTube")
+                st.caption("➕ Fixe um vídeo favorito (abaixo) pra ele aparecer aqui.")
+            with st.expander("➕ Fixar meu vídeo favorito"):
+                nova_url = st.text_input("Cole a URL do Short aqui:", key="url_fixar_demo")
                 if st.button("💾 Salvar vídeo favorito", key="btn_fixar_demo"):
                     if vid_m.fixar(objetivos[0], nova_url or ""):
-                        st.success("Memorizado! A partir de agora é o vídeo desse conceito.")
+                        st.success("Memorizado! Esse vira o vídeo do conceito já no carregamento seguinte.")
                     else:
-                        st.error("URL estranha ou conceito inválido — cola o link completo do YouTube.")
-
-        if card.get("rr_baixo"):
-            st.warning(f"⚠️ R:R {card['rr_baixo']:.2f} < 1.0 — execução travada. "
-                       "Esperar setup melhor é trade bom.")
-        else:
-            st.markdown(f"✅ **R:R {card['rr']:.2f}** · gatilho: *{card['gatilho']}*")
-
-            lado = card["direcao"]
-            if st.checkbox("⚡ Confirmo: conta DEMO, li o plano inteiro",
-                           value=st.session_state.get("demo_ok", False)):
-                st.session_state["demo_ok"] = True
-                boa = lado == "compra"
-                n1 = "🟢 ARMAR COMPRA" if boa else "🔴 ARMAR VENDA"
-                if st.button(n1, type="secondary"):
-                    st.session_state["armado"] = (lado, datetime.now().timestamp())
-                armado = st.session_state.get("armado")
-                if armado and armado[0] == lado and (datetime.now().timestamp() - armado[1]) < 240:
-                    st.write(f"🔒 **Arma armada** — {lado.upper()} @ {data.fmt(card['preco'])} · "
-                             f"SL {data.fmt(card['stop'])} · TP {data.fmt(card['alvo'])} · lote 0.01")
-                    st.write(f"*Confirma em {(240 - int(datetime.now().timestamp() - armado[1]))}s*")
-                    if st.button(f"🔥 **CONFIRMAR {lado.upper()}** — enviar ordem (lote 0.01)",
-                                 type="primary"):
-                        st.session_state["armado"] = None
-                        with st.spinner("Enviando pra ponte..."):
-                            resp = mt5_data.enviar(lado, 0.01, card["stop"], card["alvo"])
-                        if resp and resp.get("ok"):
-                            tr_m.registra({
-                                "quando": tr_m.agora(), "tipo": "demo",
-                                "symbol": resp["symbol"], "direcao": lado,
-                                "lote": resp["lote"], "entrada": resp["preco"],
-                                "stop": resp["sl"], "alvo": resp["tp"],
-                                "plano": card["headline"], "ticket": resp["ticket"],
-                            })
-                            st.toast(f"Ordem no ar! ticket {resp['ticket']}", icon="✅")
-                            st.success(f"💰 **{lado.upper()} no ar** — ticket `{resp['ticket']}` · "
-                                       f"entrada {data.fmt(resp['preco'])} · SL {data.fmt(resp['sl'])} · "
-                                       f"TP {data.fmt(resp['tp'])}")
-                        else:
-                            st.error(f"Corretor recusou: {((resp or {}).get('erro', 'sem resposta'))}")
-                elif armado and armado[0] != lado:
-                    st.session_state["armado"] = None
+                        st.error("URL estranha — cola o link completo do YouTube.")
 
     # ---- posições abertas ----
     pos_ = mt5_data.positions()
