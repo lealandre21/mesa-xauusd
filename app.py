@@ -187,17 +187,45 @@ from modules import trades as tr_m  # noqa: E402
 
 st.subheader("🧪 Modo Conta Demo (entrada assistida pelo plano)")
 
-demo_acct = mt5_data.acct()
-if not demo_acct:
-    st.info("🔌 Ponte MT5 desligada — liga o terminal pra usar entradas. "
-            "A Mesa continua lendo normal (proxy Binance).")
-elif not demo_acct.get("demo"):
-    st.error("⛔ CONTA NÃO-DEMO detectada — botões bloqueados por segurança.")
-else:
+
+@st.fragment(run_every="30s")
+def modo_demo():
+    """Cartão vivo: reavalia o plano sozinho a cada 30s e bipa na virada de estado."""
+    from modules import som as som_m
+
+    demo_acct = mt5_data.acct()
+    if not demo_acct:
+        st.info("🔌 Ponte MT5 desligada — liga o terminal pra usar entradas. "
+                "A Mesa continua lendo normal (proxy Binance).")
+        return
+    elif not demo_acct.get("demo"):
+        st.error("⛔ CONTA NÃO-DEMO detectada — botões bloqueados por segurança.")
+        return
+
     st.caption(f"Conta `{demo_acct['login']}` @ {demo_acct['servidor']} · "
                f"saldo {demo_acct['saldo']:.2f} {demo_acct['moeda']} · DEMO confirmada")
 
     card = tr_m.cartao()
+    estado = "de_fora"
+    if not card.get("sem_setup"):
+        estado = "atencao" if card.get("rr_baixo") else "pronto"
+
+    # som UMA vez na virada de estado (nunca em loop)
+    anterior = st.session_state.get("demo_estado2")
+    if anterior != estado:
+        st.session_state["demo_estado2"] = estado
+        if estado == "atencao" and anterior in ("de_fora", None):
+            w = som_m.beep("atencao")
+            if w:
+                st.audio(w, format="audio/wav", autoplay=True)
+            st.toast("🔔 Atenção: plano tomou forma — R:R ainda fraco, continue observando",
+                     icon="🔔")
+        elif estado == "pronto" and anterior != "pronto":
+            w = som_m.beep("gatilho")
+            if w:
+                st.audio(w, format="audio/wav", autoplay=True)
+            st.toast("🔔🔔 R:R liberado! Cartão pronto pra armar", icon="✅")
+
     if card.get("sem_setup"):
         st.info(f"🧭 {card['headline']} — sem gatilho de entrada agora. "
                 "Esperar é executar também.")
@@ -230,9 +258,9 @@ else:
                              f"SL {data.fmt(card['stop'])} · TP {data.fmt(card['alvo'])} · lote 0.01")
                     st.write(f"*Confirma em {(240 - int(datetime.now().timestamp() - armado[1]))}s*")
                     if st.button(f"🔥 **CONFIRMAR {lado.upper()}** — enviar ordem (lote 0.01)",
-                                 type="primary" if boa else "primary"):
+                                 type="primary"):
                         st.session_state["armado"] = None
-                        with st.spinner("Enviando pra bridge..."):
+                        with st.spinner("Enviando pra ponte..."):
                             resp = mt5_data.enviar(lado, 0.01, card["stop"], card["alvo"])
                         if resp and resp.get("ok"):
                             tr_m.registra({
@@ -251,26 +279,29 @@ else:
                 elif armado and armado[0] != lado:
                     st.session_state["armado"] = None
 
-# ---- posições abertas ----
-pos_ = mt5_data.positions()
-if pos_:
-    st.markdown("##### 📈 Posições abertas")
-    for p in pos_:
-        cor_sinal = "🟢" if p["direcao"] == "compra" else "🔴"
-        lc1, lc2, lc3, lc4 = st.columns([1.5, 1.2, 1.8, 0.9])
-        lc1.write(f"{cor_sinal} **{p['direcao']}** `{p['ticket']}` · lote {p['lote']}")
-        lc2.write(f"entrou **{data.fmt(p['entrada'])}**")
-        lc3.write(f"SL {data.fmt(p['sl'])} · TP {data.fmt(p['tp'])}")
-        lc4.write(f"{'🟢' if p['lucro'] >= 0 else '🔴'} **${p['lucro']:+.2f}**")
-        if st.button(f"✖ Fechar {p['ticket']}", key=f"f{p['ticket']}"):
-            r = mt5_data.fechar(p["ticket"])
-            if r and r.get("ok"):
-                st.toast(f"Posição {p['ticket']} fechada (lucro {p['lucro']:+.2f})", icon="✅")
-                st.rerun()
-            else:
-                st.error(f"Fecho recusado: {(r or {}).get('erro', 'sem resposta')}")
-elif mt5_data.alive():
-    st.caption("📈 Nenhuma posição aberta agora.")
+    # ---- posições abertas ----
+    pos_ = mt5_data.positions()
+    if pos_:
+        st.markdown("##### 📈 Posições abertas")
+        for p in pos_:
+            cor_sinal = "🟢" if p["direcao"] == "compra" else "🔴"
+            lc1, lc2, lc3, lc4 = st.columns([1.5, 1.2, 1.8, 0.9])
+            lc1.write(f"{cor_sinal} **{p['direcao']}** `{p['ticket']}` · lote {p['lote']}")
+            lc2.write(f"entrou {data.fmt(p['entrada'])}")
+            lc3.write(f"SL {data.fmt(p['sl'])} · TP {data.fmt(p['tp'])}")
+            lc4.write(f"{'🟢' if p['lucro'] >= 0 else '🔴'} **${p['lucro']:+.2f}**")
+            if st.button(f"✖ Fechar {p['ticket']}", key=f"f{p['ticket']}"):
+                r = mt5_data.fechar(p["ticket"])
+                if r and r.get("ok"):
+                    st.toast(f"Posição {p['ticket']} fechada (lucro {p['lucro']:+.2f})", icon="✅")
+                    st.rerun(scope="fragment")
+                else:
+                    st.error(f"Fecho recusado: {(r or {}).get('erro', 'sem resposta')}")
+    elif mt5_data.alive():
+        st.caption("📈 Nenhuma posição aberta agora.")
+
+
+modo_demo()
 
 st.divider()
 
