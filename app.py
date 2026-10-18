@@ -29,6 +29,7 @@ with st.sidebar:
     if gw:
         st.success(f"🤖 Hub de IAs · {secrets.mascarado_cfg(gw)}")
         usar_claude = st.toggle("🧠 Ligar IA real", value=False)
+        api_key = ""  # hub cuida do token por dentro (chat usa gw["token"])
         rotas = ["auto/claude-haiku", "auto/claude-sonnet", "auto/best-free",
                  "auto/best-chat", "auto/fast", "auto/thrifty"]
         modelo = st.selectbox("Modelo", rotas, index=0)
