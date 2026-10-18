@@ -116,8 +116,10 @@ st.divider()
 g1, g2 = st.columns([7, 5])
 
 with g1:
-    tf = st.radio("TF", ["15m", "1h"], horizontal=True, label_visibility="collapsed")
-    show_chart(tf, height=430)
+    tf = st.radio("TF", ["15m", "1h", "4h"], horizontal=True, label_visibility="collapsed")
+    show_tradingview(tf, height=520)
+    with st.expander("📐 Leitura SMC anotada (zonas/BoS/FVG desenhadas)"):
+        show_chart(tf, height=430)
 
 with g2:
     p = plan.plano()
@@ -242,9 +244,6 @@ with st.expander("📊 NOTA DA MESA (backtest honesto da leitura)"):
         for quando, direcao, delta, marca in exemplos:
             st.write(f"{marca} `{quando}` · chamou **{direcao}** · mercado andou {delta:+.2f}")
         st.caption("💬 A nota cresce com os dias de diário. Leitura sem cobrança é opinião; com cobrança é método.")
-
-with st.expander("🌐 TradingView (plataforma externa)"):
-    show_tradingview()
 
 with st.expander("🩺 Sistema"):
     st.info(market_analysis())
