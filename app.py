@@ -298,7 +298,7 @@ def modo_demo():
             # 🎬 player pequeno do lado das informações (se houver vídeo fixado)
             url_embed = vid_m.embed_url(url_fixada or "")
             if url_embed:
-                st.components.v1.iframe(url_embed, width=280, height=500)
+                st.iframe(url_embed, width=280, height=500)
                 st.markdown(f"[⤴️ abrir maior]({url_v})", help="Abre no YouTube")
             else:
                 st.link_button(rotulo, url=url_v, help="Abre no YouTube")
