@@ -85,6 +85,7 @@ class Handler(BaseHTTPRequestHandler):
                     "servidor": a.server if a else None,
                     "moeda": a.currency if a else None,
                     "saldo": a.balance if a else None,
+                    "demo": bool(a and a.trade_mode == 0),
                 })
             elif partes.path == "/tick":
                 nome, t = escolhe_simbolo()
@@ -112,10 +113,139 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"conectado": False, "erro": mt5.last_error()}, 503)
                     return
                 self._json({"conectado": True, "symbol": nome, "candles": rates_para_candles(rates)})
+            elif partes.path == "/sym":
+                nome, _ = escolhe_simbolo()
+                s = mt5.symbol_info(nome) if nome else None
+                if not s:
+                    self._json({"conectado": False}, 503)
+                    return
+                self._json({
+                    "conectado": True,
+                    "symbol": nome,
+                    "volume_min": s.volume_min,
+                    "tick_value": s.trade_tick_value,
+                    "tick_size": s.trade_tick_size,
+                })
+            elif partes.path == "/positions":
+                nome, _ = escolhe_simbolo()
+                if not nome:
+                    self._json({"conectado": False}, 503)
+                    return
+                ps = mt5.positions_get(symbol=nome) or []
+                out = []
+                for p in ps:
+                    out.append({
+                        "ticket": p.ticket,
+                        "direcao": "compra" if p.type == 0 else "venda",
+                        "lote": p.volume,
+                        "entrada": p.price_open,
+                        "sl": p.sl,
+                        "tp": p.tp,
+                        "atual": p.price_current,
+                        "lucro": p.profit,
+                    })
+                self._json({"conectado": True, "positions": out})
+            elif partes.path == "/deals":
+                """Pregões realizados nas últimas 24h (resultado de posições fechadas)."""
+                from datetime import datetime, timedelta, timezone
+                de = int((datetime.now(timezone.utc) - timedelta(hours=24)).timestamp())
+                ds = mt5.history_deals_get(de, int(time.time()))
+                out = []
+                for d in ds or []:
+                    if d.entry in (0, 1):  # 0=entrada, 1=fim/fechamento com lucro
+                        out.append({
+                            "ticket": d.position_id,
+                            "lucro": d.profit,
+                            "quando": d.time * 1000,
+                        })
+                self._json({"conectado": True, "deals": out})
             elif partes.path == "/health":
                 self._json({"vivo": True, "agora": datetime.now(timezone.utc).isoformat()})
             else:
                 self._json({"erro": "rota desconhecida"}, 404)
+        except (ValueError, KeyError, ConnectionError, OSError) as e:
+            self._json({"erro": str(e)}, 500)
+
+    def do_POST(self):
+        import json as _json
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+            corpo = _json.loads(self.rfile.read(n) or b"{}")
+            partes = urllib.parse.urlparse(self.path).path
+
+            # trava anti-real: só conta DEMO passa (trade_mode 0)
+            a = mt5.account_info()
+            if not a or a.trade_mode != 0:
+                self._json({"erro": "BLOQUEADO: conta não é demo — ponte recusou."}, 403)
+                return
+
+            nome, t = escolhe_simbolo()
+            if not nome or not t:
+                self._json({"erro": "sem símbolo vivo"}, 503)
+                return
+            s = mt5.symbol_info(nome)
+            mt5.symbol_select(nome, True)
+
+            if partes == "/order":
+                direcao = corpo.get("direcao")
+                lote = float(corpo.get("lote", 0.01))
+                lote = max(s.volume_min, min(lote, 0.05))  # teto de segurança
+                sl = float(corpo["sl"]) if corpo.get("sl") else None
+                tp = float(corpo["tp"]) if corpo.get("tp") else None
+                if not sl:
+                    self._json({"erro": "recusado: ordem SEM stop não passa"}, 400)
+                    return
+                tipo = mt5.ORDER_TYPE_BUY if direcao == "compra" else mt5.ORDER_TYPE_SELL
+                preco = t.ask if direcao == "compra" else t.bid
+                for filling in (mt5.ORDER_FILLING_FOK, mt5.ORDER_FILLING_IOC):
+                    req = {
+                        "action": mt5.TRADE_ACTION_DEAL,
+                        "symbol": nome,
+                        "volume": lote,
+                        "type": tipo,
+                        "price": preco,
+                        "sl": sl,
+                        "tp": tp,
+                        "deviation": 30,
+                        "magic": 20261018,
+                        "filling_mode": filling,
+                    }
+                    r = mt5.order_send(req)
+                    if r is not None and r.retcode == mt5.TRADE_RETCODE_DONE:
+                        self._json({
+                            "ok": True, "ticket": r.order, "symbol": nome,
+                            "preco": r.price or preco, "lote": lote, "sl": sl, "tp": tp,
+                        })
+                        return
+                self._json({"erro": f"corretora recusou: retcode {(r.retcode if r else '?')}"}, 502)
+
+            elif partes == "/close":
+                ticket = int(corpo["ticket"])
+                ps = mt5.positions_get(ticket=ticket) or []
+                if not ps:
+                    self._json({"erro": "posição não encontrada"}, 404)
+                    return
+                p = ps[0]
+                tipo = mt5.ORDER_TYPE_SELL if p.type == 0 else mt5.ORDER_TYPE_BUY
+                preco = t.bid if p.type == 0 else t.ask
+                for filling in (mt5.ORDER_FILLING_FOK, mt5.ORDER_FILLING_IOC):
+                    req = {
+                        "action": mt5.TRADE_ACTION_DEAL,
+                        "symbol": p.symbol,
+                        "position": ticket,
+                        "volume": p.volume,
+                        "type": tipo,
+                        "price": preco,
+                        "deviation": 30,
+                        "filling_mode": filling,
+                    }
+                    r = mt5.order_send(req)
+                    if r is not None and r.retcode == mt5.TRADE_RETCODE_DONE:
+                        self._json({"ok": True, "ticket": ticket, "lucro": p.profit})
+                        return
+                self._json({"erro": f"fecho recusado: retcode {(r.retcode if r else '?')}"}, 502)
+            else:
+                self._json({"erro": "rota POST desconhecida"}, 404)
         except (ValueError, KeyError, ConnectionError, OSError) as e:
             self._json({"erro": str(e)}, 500)
 

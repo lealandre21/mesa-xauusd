@@ -2,7 +2,7 @@ import streamlit as st
 
 from datetime import datetime
 
-from modules import data, plan, scan, counselor, chat, diario, dashboard, secrets, voz, indicadores, news
+from modules import data, plan, scan, counselor, chat, diario, dashboard, secrets, voz, indicadores, news, mt5_data
 from modules.chart import show_chart
 from modules.calendar import upcoming
 from modules.nota import resumo as nota_resumo
@@ -178,6 +178,99 @@ if ind and ind.get("rsi") is not None:
         pc, pv = ind["press"] or (None, None)
         st.metric("⚖️ Pressão", f"{pc:.0f}%⬆ / {pv:.0f}%⬇" if pc is not None else "-")
         st.caption(ind["press_txt"])
+
+# =====================================
+# MODO CONTA DEMO (execução assistida) — só demo, 2-passos, stop obrigatório
+# =====================================
+
+from modules import trades as tr_m  # noqa: E402
+
+st.subheader("🧪 Modo Conta Demo (entrada assistida pelo plano)")
+
+demo_acct = mt5_data.acct()
+if not demo_acct:
+    st.info("🔌 Ponte MT5 desligada — liga o terminal pra usar entradas. "
+            "A Mesa continua lendo normal (proxy Binance).")
+elif not demo_acct.get("demo"):
+    st.error("⛔ CONTA NÃO-DEMO detectada — botões bloqueados por segurança.")
+else:
+    st.caption(f"Conta `{demo_acct['login']}` @ {demo_acct['servidor']} · "
+               f"saldo {demo_acct['saldo']:.2f} {demo_acct['moeda']} · DEMO confirmada")
+
+    card = tr_m.cartao()
+    if card.get("sem_setup"):
+        st.info(f"🧭 {card['headline']} — sem gatilho de entrada agora. "
+                "Esperar é executar também.")
+    else:
+        c1, c2, c3, c4 = st.columns([1.1, 1.1, 1.1, 1.3])
+        c1.metric("🎯 Entrada (mercado)", data.fmt(card["preco"]))
+        c2.metric("⛔ Stop", data.fmt(card["stop"]))
+        c3.metric("🏁 Alvo", data.fmt(card["alvo"]))
+        c4.metric("⚖️ R:R", f"{card['rr']:.2f}" if card.get("rr") else "auto")
+        st.caption(f"📋 Plano: **{card['headline']}** · risco estimado "
+                   f"US$ {tr_m.risco_dinheiro(card['preco'], card['stop'], *mt5_data.risco() or (None, None)):.2f} (lote 0.01) · "
+                   f"invalidação: {card['invalida_txt'] if not card.get('rr_baixo') else 'R:R insuficiente — plano recusado'}")
+        if card.get("rr_baixo"):
+            st.warning(f"⚠️ R:R {card['rr_baixo']:.2f} < 1.0 — execução travada. "
+                       "Esperar setup melhor é trade bom.")
+        else:
+            st.markdown(f"✅ **R:R {card['rr']:.2f}** · gatilho: *{card['gatilho']}*")
+
+            lado = card["direcao"]
+            if st.checkbox("⚡ Confirmo: conta DEMO, li o plano inteiro",
+                           value=st.session_state.get("demo_ok", False)):
+                st.session_state["demo_ok"] = True
+                boa = lado == "compra"
+                n1 = "🟢 ARMAR COMPRA" if boa else "🔴 ARMAR VENDA"
+                if st.button(n1, type="secondary"):
+                    st.session_state["armado"] = (lado, datetime.now().timestamp())
+                armado = st.session_state.get("armado")
+                if armado and armado[0] == lado and (datetime.now().timestamp() - armado[1]) < 240:
+                    st.write(f"🔒 **Arma armada** — {lado.upper()} @ {data.fmt(card['preco'])} · "
+                             f"SL {data.fmt(card['stop'])} · TP {data.fmt(card['alvo'])} · lote 0.01")
+                    st.write(f"*Confirma em {(240 - int(datetime.now().timestamp() - armado[1]))}s*")
+                    if st.button(f"🔥 **CONFIRMAR {lado.upper()}** — enviar ordem (lote 0.01)",
+                                 type="primary" if boa else "primary"):
+                        st.session_state["armado"] = None
+                        with st.spinner("Enviando pra bridge..."):
+                            resp = mt5_data.enviar(lado, 0.01, card["stop"], card["alvo"])
+                        if resp and resp.get("ok"):
+                            tr_m.registra({
+                                "quando": tr_m.agora(), "tipo": "demo",
+                                "symbol": resp["symbol"], "direcao": lado,
+                                "lote": resp["lote"], "entrada": resp["preco"],
+                                "stop": resp["sl"], "alvo": resp["tp"],
+                                "plano": card["headline"], "ticket": resp["ticket"],
+                            })
+                            st.toast(f"Ordem no ar! ticket {resp['ticket']}", icon="✅")
+                            st.success(f"💰 **{lado.upper()} no ar** — ticket `{resp['ticket']}` · "
+                                       f"entrada {data.fmt(resp['preco'])} · SL {data.fmt(resp['sl'])} · "
+                                       f"TP {data.fmt(resp['tp'])}")
+                        else:
+                            st.error(f"Corretor recusou: {((resp or {}).get('erro', 'sem resposta'))}")
+                elif armado and armado[0] != lado:
+                    st.session_state["armado"] = None
+
+# ---- posições abertas ----
+pos_ = mt5_data.positions()
+if pos_:
+    st.markdown("##### 📈 Posições abertas")
+    for p in pos_:
+        cor_sinal = "🟢" if p["direcao"] == "compra" else "🔴"
+        lc1, lc2, lc3, lc4 = st.columns([1.5, 1.2, 1.8, 0.9])
+        lc1.write(f"{cor_sinal} **{p['direcao']}** `{p['ticket']}` · lote {p['lote']}")
+        lc2.write(f"entrou **{data.fmt(p['entrada'])}**")
+        lc3.write(f"SL {data.fmt(p['sl'])} · TP {data.fmt(p['tp'])}")
+        lc4.write(f"{'🟢' if p['lucro'] >= 0 else '🔴'} **${p['lucro']:+.2f}**")
+        if st.button(f"✖ Fechar {p['ticket']}", key=f"f{p['ticket']}"):
+            r = mt5_data.fechar(p["ticket"])
+            if r and r.get("ok"):
+                st.toast(f"Posição {p['ticket']} fechada (lucro {p['lucro']:+.2f})", icon="✅")
+                st.rerun()
+            else:
+                st.error(f"Fecho recusado: {(r or {}).get('erro', 'sem resposta')}")
+elif mt5_data.alive():
+    st.caption("📈 Nenhuma posição aberta agora.")
 
 st.divider()
 
