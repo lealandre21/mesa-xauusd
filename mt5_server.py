@@ -161,7 +161,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"conectado": True, "deals": out})
             elif partes.path == "/health":
                 from datetime import datetime as _dt, timezone as _tz
-                self._json({"vivo": True, "agora": _dt.now(_tz).isoformat()})
+                self._json({"vivo": True, "agora": _dt.now(_tz.utc).isoformat()})
             else:
                 self._json({"erro": "rota desconhecida"}, 404)
         except (ValueError, KeyError, ConnectionError, OSError) as e:
